@@ -618,7 +618,7 @@ For each repo get its license
 
 ## git
 
-If one has a tarball of a repo, one also has .git directory with all the commits.
+If one has a tarball of a repo, one also has .git directory with all the commits. (Not true, the tarball doesn't have .git dir)
 Don't want to support
 
 

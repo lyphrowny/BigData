@@ -1,0 +1,124 @@
+version: '1'
+services:
+  redash:
+    container_name: bigdata_redash-server
+    image: redash/redash:latest
+    command: server
+    depends_on:
+      - redash-postgres
+      - redis
+      - init_db
+    ports:
+      - "5002:5000"
+    env_file:
+      - .env
+    environment:
+      REDASH_WEB_WORKERS: 4
+      REDASH_REDIS_URL: "redis://redis:6379/0"
+    networks:
+      - celerynetwork
+
+  init_db:
+    container_name: bigdata_redash-init-db
+    image: redash/redash:latest
+    command: create_db && exit
+    depends_on:
+      - redash-postgres
+    env_file:
+      - .env
+    networks:
+      - celerynetwork
+
+  redash-scheduler:
+    container_name: bigdata_redash-scheduler
+    image: redash/redash:latest
+    depends_on:
+      - redash-postgres
+      - redis
+    command: scheduler
+    ports:
+      - "5003:5000"
+    env_file:
+      - .env
+    environment:
+      REDASH_REDIS_URL: "redis://redis:6379/0"
+      QUEUES: "celery"
+      WORKERS_COUNT: 2
+    networks:
+      - celerynetwork
+
+  redash-worker:
+    container_name: bigdata_redash-worker
+    image: redash/redash:latest
+    depends_on:
+      - redash-postgres
+      - redis
+    command: worker
+    ports:
+      - "5004:5000"
+    env_file:
+      - .env
+    environment:
+      REDASH_REDIS_URL: "redis://redis:6379/0"
+      QUEUES: "queries,scheduled_queries,celery"
+      WORKERS_COUNT: 2
+    networks:
+      - celerynetwork
+  redis:
+    image: redis:5.0-alpine
+    restart: always
+    networks:
+      - celerynetwork
+
+  db:
+    image: mongo:4.0.8
+    command: mongod --quiet --logpath /dev/null
+    restart: unless-stopped
+    networks:
+      - celerynetwork
+    environment:
+      MONGODB_LOG_DIR: /dev/null
+    ports:
+      - 27017:27017
+    volumes:
+      - ./data/:/data/db
+
+  processor:
+    build: ./python
+    container_name: bigdata_processor
+    user: root
+    volumes:
+      - ./python:/python
+      - ./data:/data/db
+    entrypoint: python3 -u python/main.py
+    ports:
+      - '8501:8501'
+    networks:
+      - celerynetwork
+    environment:
+      DB_URL: mongodb://db
+      DB_NAME: repo_db
+      DB_COLLECTION: repos
+      DB_DATA_DIR: /data/db
+      SPARK_RESULT_DIR: /result
+      SPARK_PRETTY_OUT_DIR: /pretty_csv	
+      PYTHONUNBUFFERED: 1
+
+  redash-postgres:
+    container_name: bigdata_redash-postgres
+    image: postgres:13-alpine
+    environment:
+      - POSTGRES_USER=${REDASH_PG_USER}
+      - POSTGRES_PASSWORD=${REDASH_PG_PASSWORD}
+      - POSTGRES_DB=${REDASH_PG_DB}
+    volumes:
+      - pgdata_redash:/var/lib/postgresql/data
+    networks:
+      - celerynetwork
+
+networks:
+  celerynetwork:
+    driver: bridge
+
+volumes:
+  pgdata_redash:
